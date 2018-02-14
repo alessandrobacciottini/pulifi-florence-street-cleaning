@@ -1,0 +1,9 @@
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <SwitchPreference
+        android:defaultValue="true"
+        android:key="use_gps"
+        android:summary="Si raccomanda di non disattivare questa impostazione, al fine di garantire un'esperienza utente completa"
+        android:title="Utilizza dati GPS" />
+
+</PreferenceScreen>

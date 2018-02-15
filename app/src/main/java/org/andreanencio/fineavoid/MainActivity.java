@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
-import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -28,10 +27,6 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
-import android.text.Spannable;
-import android.text.SpannableString;
-import android.text.style.ImageSpan;
-import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.Menu;
@@ -63,7 +58,6 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     public LocationListener locationListener;
     public LocationManager locationManager;
 
-    public Context context;
     public Activity activity;
     public MainActivity me;
 
@@ -75,6 +69,8 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     private TextView streetField;
 
     private boolean isGPSAllowed;
+    private boolean isNotifAllowed;
+
     private boolean isParked = false;
     private boolean isNotificationActive = false;
     private boolean isSearchVisible = false;
@@ -82,12 +78,10 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
-        context = this;
         activity = this;
         me = this;
 
         NotificationPublisher.activity = me;
-
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -97,25 +91,21 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         streetField.setTextColor(Color.WHITE);
         streetField.setBackgroundColor(Color.parseColor("#434a9d"));
 
-        locateButton = (FloatingActionButton)findViewById(R.id.locateButton);
-        park = (FloatingActionButton) findViewById(R.id.parkButton);
-        settings = PreferenceManager.getDefaultSharedPreferences(this);
-
         View root = findViewById(R.id.cleanButton).getRootView();
         root.setBackgroundColor(getResources().getColor(R.color.custom));
 
+        settings = PreferenceManager.getDefaultSharedPreferences(me);
+        isNotifAllowed = settings.getBoolean("notifications_new_message", true);
         isGPSAllowed = settings.getBoolean("use_gps", true);
-        if(!isGPSAllowed)
-            Utils.alert(this, "Ti consigliamo di attivare il GPS nelle impostazioni per un utilizzo ottimale dell'applicazione.", "GPS disattivato");
 
         mapFragment = (MapFragment)getSupportFragmentManager().findFragmentById(R.id.fragment);
         mapFragment.activity = me;
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION))
+        if (ContextCompat.checkSelfPermission(me, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.shouldShowRequestPermissionRationale(me, Manifest.permission.ACCESS_FINE_LOCATION))
                 return;
             else
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, GPS_PERMISSION);
+                ActivityCompat.requestPermissions(me, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, GPS_PERMISSION);
         }
 
         locationManager = (LocationManager)getSystemService(Context.LOCATION_SERVICE);
@@ -193,6 +183,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             }
         });
 
+        park = (FloatingActionButton) findViewById(R.id.parkButton);
         if (savedInstanceState != null && savedInstanceState.containsKey("P_ENABLED")) {
             park.setClickable(savedInstanceState.getBoolean("P_CLICKED"));
             park.setEnabled(savedInstanceState.getBoolean("P_ENABLED"));
@@ -206,7 +197,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             public void onClick(View view) {
 
                 if (!isParked) {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    if (ContextCompat.checkSelfPermission(me, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                         if (ActivityCompat.shouldShowRequestPermissionRationale(activity,
                                 Manifest.permission.ACCESS_FINE_LOCATION)) {
 
@@ -215,22 +206,22 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                     }
                     Location l = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
                     if (l == null) {
-                        AlertDialog.Builder alertNoPosition = new AlertDialog.Builder(context);
+                        AlertDialog.Builder alertNoPosition = new AlertDialog.Builder(me);
                         alertNoPosition.setTitle("Posizione non trovata!").show();
                     } else {
-                        Geocoder geoCoder = new Geocoder(context);
+                        Geocoder geoCoder = new Geocoder(me);
                         List<Address> matches = null;
                         try {
                             matches = geoCoder.getFromLocation(mapFragment.location.latitude, mapFragment.location.longitude, 1);
                         } catch (Exception ex) {
-                            Utils.alert(context, ex.getMessage(), "Errore");
+                            Utils.alert(me, ex.getMessage(), "Errore");
                         }
 
                         Address bestMatch = (matches.isEmpty() ? null : matches.get(0));
                         if(bestMatch != null)
                         {
                             streetField.setText(bestMatch.getThoroughfare().toCharArray(), 0, bestMatch.getThoroughfare().length());
-                            String response = CleanParser.parse(context, bestMatch.getThoroughfare());
+                            String response = CleanParser.parse(me, bestMatch.getThoroughfare());
 
                             if(response != null)
                             {
@@ -246,12 +237,15 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                                 String minutis = parts2[1];
 
                                 lastNotifData = response;
+                                settings.edit().putBoolean("is_parked", true).apply();
+                                settings.edit().putFloat("park_lat", (float)mapFragment.location.latitude).apply();
+                                settings.edit().putFloat("park_lon", (float)mapFragment.location.longitude).apply();
 
                                 int oraInizio = Integer.parseInt(oras);
                                 int minutiInizio = Integer.parseInt(minutis);
                                 try {
                                     String content = "Pulizia strada alle ore " + oras + ":" + minutis + ". Rimuovi la macchina!";
-                                    AlertParking.scheduleNotification(context, AlertParking.getNotification(context, content), oraInizio, minutiInizio);
+                                    AlertParking.scheduleNotification(me, AlertParking.getNotification(me, content), oraInizio, minutiInizio);
                                     me.changeNotificationStatus(true);
                                 } catch (ParseException ex) {
                                     ex.printStackTrace();
@@ -259,7 +253,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                             }
                             else
                             {
-                                AlertDialog.Builder builder = new AlertDialog.Builder(context);
+                                AlertDialog.Builder builder = new AlertDialog.Builder(me);
                                 builder.setIcon(R.drawable.bell);
                                 builder.setTitle("Ooops");
                                 builder.setMessage("Questa strada sembra non appartenere al comune di Firenze.\n\nImpossibile attivare la notifica.");
@@ -281,7 +275,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             @Override
             public void onClick(View view) {
 
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                if (ContextCompat.checkSelfPermission(me, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     if (ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.ACCESS_FINE_LOCATION)) {
 
                     } else
@@ -295,11 +289,11 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                     Location l = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
 
                     if (l == null) {
-                        AlertDialog.Builder alertNoPosition = new AlertDialog.Builder(context);
+                        AlertDialog.Builder alertNoPosition = new AlertDialog.Builder(me);
                         alertNoPosition.setTitle("Posizione non identificata").show();
                     } else {
 
-                        Geocoder geoCoder = new Geocoder(context);
+                        Geocoder geoCoder = new Geocoder(me);
                         List<Address> matches = null;
                         try {
                             matches = geoCoder.getFromLocation(l.getLatitude(), l.getLongitude(), 1);
@@ -317,9 +311,9 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                 } else {
                     AlertDialog.Builder builder;
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
-                        builder = new AlertDialog.Builder(context, android.R.style.Theme_Material_Dialog_Alert);
+                        builder = new AlertDialog.Builder(me, android.R.style.Theme_Material_Dialog_Alert);
                     else
-                        builder = new AlertDialog.Builder(context);
+                        builder = new AlertDialog.Builder(me);
 
                     builder.setTitle("GPS disattivato")
                             .setMessage("Vuoi concedere l'auorizzazione all'uso del GPS?")
@@ -345,19 +339,19 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         cleanButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                Geocoder geoCoder = new Geocoder(context);
+                Geocoder geoCoder = new Geocoder(me);
                 List<Address> matches = null;
                 try {
                     matches = geoCoder.getFromLocation(mapFragment.location.latitude, mapFragment.location.longitude, 1);
                 } catch (Exception ex) {
-                    Utils.alert(context, ex.getMessage(), "Errore");
+                    Utils.alert(me, ex.getMessage(), "Errore");
                 }
 
                 if (matches != null) {
                     Address bestMatch = (matches.isEmpty() ? null : matches.get(0));
                     streetField.setText(bestMatch.getThoroughfare().toCharArray(), 0, bestMatch.getThoroughfare().length());
 
-                    String response = CleanParser.parse(context, bestMatch.getThoroughfare());
+                    String response = CleanParser.parse(me, bestMatch.getThoroughfare());
                     if (response != null) {
                         CleanAlertFragment alertdFragment = new CleanAlertFragment();
                         Bundle args = new Bundle();
@@ -375,7 +369,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
             public void onClick(View view) {
 
                 try {
-                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                    AlertDialog.Builder builder = new AlertDialog.Builder(me);
                     builder.setIcon(R.drawable.bell)
                             .setTitle("Notifica attiva")
                             .setMessage(lastNotifData + "\n\nVuoi disattivarla?")
@@ -383,6 +377,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                                 public void onClick(DialogInterface dialog, int which) {
                                     changeNotificationStatus(false);
                                     removeNotificationAndParking();
+                                    settings.edit().putBoolean("is_parked", false).apply();
                                 }
                             })
                             .setNegativeButton(android.R.string.no, new DialogInterface.OnClickListener() {
@@ -392,19 +387,30 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
                             })
                             .show();
                 } catch (Exception ex) {
-                    Utils.alert(context, ex.getMessage(), "Errore");
+                    Utils.alert(me, ex.getMessage(), "Errore");
                 }
             }
         });
 
+        locateButton = (FloatingActionButton)findViewById(R.id.locateButton);
         locateButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 hiddenLocateButton.performClick();
             }
         });
 
+        if(!isGPSAllowed)
+            Utils.alert(me, "Ti consigliamo di attivare il GPS nelle impostazioni per un utilizzo ottimale dell'applicazione.", "GPS disattivato");
+        if(settings.getBoolean("is_parked", false))
+        {
+            LatLng parkCoordinates = new LatLng(settings.getFloat("park_lat", (float)locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER).getLatitude()),
+                    settings.getFloat("park_lon",(float)locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER).getLatitude()));
+            mapFragment.setCoordinates(parkCoordinates);
+            park.performClick();
+        }
+        else
+            hiddenLocateButton.performClick();
         changeNotificationStatus(isNotificationActive);
-        hiddenLocateButton.performClick();
     }
 
     @Override
@@ -418,7 +424,7 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         int id = item.getItemId();
 
         if (id == R.id.action_settings) {
-            Intent intent = new Intent(this, SettingsActivity.class);
+            Intent intent = new Intent(me, SettingsActivity.class);
             startActivity(intent);
             return true;
         }
@@ -495,22 +501,22 @@ public class MainActivity extends AppCompatActivity implements GoogleApiClient.C
         }
 
         changeNotificationStatus(false);
-        Intent notificationIntent = new Intent(context, NotificationPublisher.class);
+        Intent notificationIntent = new Intent(me, NotificationPublisher.class);
         notificationIntent.putExtra(NotificationPublisher.NOTIFICATION_ID, 1);
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(context, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(me, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
 
-        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        AlarmManager alarmManager = (AlarmManager) me.getSystemService(Context.ALARM_SERVICE);
         alarmManager.cancel(pendingIntent);
         hiddenLocateButton.performClick();
     }
 
     public void reverseGeocode() {
-        Geocoder geoCoder = new Geocoder(context);
+        Geocoder geoCoder = new Geocoder(me);
         List<Address> matches = null;
         try {
             matches = geoCoder.getFromLocation(mapFragment.location.latitude, mapFragment.location.longitude, 1);
         } catch (Exception ex) {
-            Utils.alert(context, ex.getMessage(), "Errore");
+            Utils.alert(me, ex.getMessage(), "Errore");
         }
 
         if (matches != null) {
